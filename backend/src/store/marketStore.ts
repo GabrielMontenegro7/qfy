@@ -1,45 +1,22 @@
-import { redisStore } from "./redisStore";
-import { memoryStore } from "./memoryStore";
 import { MarketAsset } from "../domain/market";
 
-let redisEnabled = true;
+const data = new Map<string, MarketAsset>();
 
 export const marketStore = {
-  async set(asset: MarketAsset) {
-  if (!asset.group) {
-    asset.group = "other";
-  }
-
-  if (!redisEnabled) return memoryStore.set(asset);
-
-  try {
-    await redisStore.set(asset);
-  } catch {
-    redisEnabled = false;
-    await memoryStore.set(asset);
-  }
-}
-,
-
-  async get(symbol: string) {
-    if (!redisEnabled) return memoryStore.get(symbol);
-
-    try {
-      return await redisStore.get(symbol);
-    } catch {
-      redisEnabled = false;
-      return memoryStore.get(symbol);
-    }
+  async set(asset: MarketAsset): Promise<void> {
+    data.set(asset.symbol, asset);
   },
 
-  async getAll() {
-    if (!redisEnabled) return memoryStore.getAll();
+  async get(symbol: string): Promise<MarketAsset | null> {
+    return data.get(symbol) || null;
+  },
 
-    try {
-      return await redisStore.getAll();
-    } catch {
-      redisEnabled = false;
-      return memoryStore.getAll();
-    }
+  async getAll(): Promise<MarketAsset[]> {
+    return Array.from(data.values());
+  },
+
+  // 🔥 ESSA FUNÇÃO TEM QUE EXISTIR
+  async clear(): Promise<void> {
+    data.clear();
   }
 };

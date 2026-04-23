@@ -1,57 +1,95 @@
-import "dotenv/config";
 import express from "express";
-import http from "http";
 import cors from "cors";
+import http from "http";
 import { WebSocketServer } from "ws";
 
-import { initRedis } from "./store/redisStore";
-import { startMarketSocket } from "./ws/socket";
-
 import { YahooAdapter } from "./ingestor/providers/yahoo.adapter";
-import { MarketEngine } from "./engine/market.engine";
-
+import { CMEAdapter } from "./ingestor/providers/cme.adapter";
 import { CompositeProvider } from "./ingestor/providers/composite.provider";
-import { DIProvider } from "./ingestor/providers/di.adapter";
 
-initRedis();
+import { MarketEngine } from "./engine/market.engine";
+import marketRoutes from "./api/market.routes";
+import { marketStore } from "./store/marketStore";
+
+// =========================
+// 🚀 APP
+// =========================
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
-app.get("/health", (_, res) => res.json({ status: "ok" }));
-
-const REST_PORT = Number(process.env.REST_PORT) || 3001;
-const WS_PORT = Number(process.env.WS_PORT) || 3002;
-
-/* ---------------- REST ---------------- */
-app.listen(REST_PORT, () => {
-  console.log(`🌐 REST API running on port ${REST_PORT}`);
-});
-
-/* ---------------- WEBSOCKET ---------------- */
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
-
-startMarketSocket(wss);
-
-server.listen(WS_PORT, "0.0.0.0", () => {
-  console.log(`🔌 WebSocket running on port ${WS_PORT}`);
-});
-
-/* ---------------- MARKET ENGINE ---------------- */
+// =========================
+// 🔌 PROVIDERS
+// =========================
 
 const provider = new CompositeProvider([
   new YahooAdapter(),
-  new DIProvider()
+  new CMEAdapter(),
 ]);
+
+// =========================
+// ⚙ ENGINE
+// =========================
 
 const engine = new MarketEngine(provider);
 
-// primeira carga imediata
-engine.update();
+// =========================
+// 🌐 ROUTES
+// =========================
 
-// atualização periódica
-setInterval(() => {
-  engine.update();
-}, 30_000);
+app.use("/market", marketRoutes);
+
+app.get("/", (req, res) => {
+  res.send("API QFY rodando 🚀");
+});
+
+// =========================
+// 🔥 HTTP SERVER
+// =========================
+
+const server = http.createServer(app);
+
+// =========================
+// 🔌 WEBSOCKET
+// =========================
+
+const wss = new WebSocketServer({ server });
+
+wss.on("connection", (ws) => {
+  console.log("🔌 Cliente conectado WS");
+
+  const sendData = async () => {
+    const data = await marketStore.getAll();
+    ws.send(JSON.stringify(data));
+  };
+
+  // envia imediatamente
+  sendData();
+
+  // envia a cada 3s
+  const interval = setInterval(sendData, 3000);
+
+  ws.on("close", () => {
+    clearInterval(interval);
+    console.log("❌ Cliente desconectado");
+  });
+});
+
+// =========================
+// ▶ START SERVER
+// =========================
+
+const PORT = 3002;
+
+server.listen(PORT, async () => {
+  console.log(`🌐 Server rodando em http://localhost:${PORT}`);
+
+  console.log("🚀 Iniciando Market Engine...");
+  await engine.update();
+
+  setInterval(async () => {
+    await engine.update();
+  }, 30000);
+});
